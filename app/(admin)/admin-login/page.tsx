@@ -1,23 +1,40 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useDispatch } from "react-redux";
 import mainLogo from '@/public/main-logo-nailgpt.png';
 import Image from "next/image";
+import { useLoginMutation } from "@/redux/features/auth/authApi";
+import { setUser } from "@/redux/features/auth/authSlice";
+import { toast } from "sonner";
 
 export default function LoginPage() {
+    const router = useRouter();
+    const dispatch = useDispatch();
+    const [login, { isLoading: isSubmitting }] = useLoginMutation();
+
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [rememberPassword, setRememberPassword] = useState(true);
-    const [isSubmitting, setIsSubmitting] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsSubmitting(true);
         try {
-            // TODO: wire up to your auth/RTK Query mutation
-            console.log({ email, password, rememberPassword });
-        } finally {
-            setIsSubmitting(false);
+            const response = await login({ email, password }).unwrap();
+
+            dispatch(
+                setUser({
+                    user: response.user,
+                    access: response.access,
+                    refresh: response.refresh,
+                })
+            );
+
+            toast.success("Logged in successfully");
+            router.push("/admin");
+        } catch (error: any) {
+            toast.error(error?.data?.detail || "Invalid email or password");
         }
     };
 

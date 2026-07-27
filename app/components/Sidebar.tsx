@@ -6,9 +6,12 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import mainLogo from '@/public/main-logo-nailgpt.png';
 import Image from 'next/image';
+import { selectUser } from '@/redux/features/auth/authSlice';
+import { useAppSelector } from '@/redux/hooks';
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
+  const user = useAppSelector(selectUser);
   const pathname = usePathname();
 
   const navItems = [
@@ -91,8 +94,8 @@ export default function Sidebar() {
               J
             </div>
             <div>
-              <p className="text-xs sm:text-sm font-semibold text-yellow-700">Jenni</p>
-              <p className="text-xs text-yellow-600">Owner</p>
+              <p className="text-xs sm:text-sm font-semibold text-yellow-700">{user?.full_name}</p>
+              <p className="text-xs text-yellow-600">Admin</p>
             </div>
           </div>
         </div>

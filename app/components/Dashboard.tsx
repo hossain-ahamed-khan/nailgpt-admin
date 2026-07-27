@@ -1,5 +1,7 @@
 "use client";
 
+import { selectUser } from "@/redux/features/auth/authSlice";
+import { useAppSelector } from "@/redux/hooks";
 import React, { useState } from "react";
 import {
   LineChart,
@@ -106,13 +108,15 @@ const avatarColors = [
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
+  const user = useAppSelector(selectUser);
+
   return (
     <div className="flex-1 bg-gray-50 overflow-y-auto font-sans">
       <div className="w-full h-full flex flex-col px-4 py-4 sm:px-6 sm:py-6 md:px-8 md:py-8">
         {/* Header */}
         <div className="mb-4 sm:mb-6 md:mb-8">
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-amber-400">
-            Welcome back, Jenni 👋
+            Welcome back, {user?.full_name} 👋
           </h1>
           <p className="text-gray-500 mt-1 text-xs sm:text-sm">
             Here's what's happening in your app today.
