@@ -1,13 +1,37 @@
 "use client";
 
-import React, { useState } from "react";
+import { useGetAllUsersQuery } from "@/redux/features/admin/users/usersApi";
+import React, { useMemo, useState } from "react";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── API Types ────────────────────────────────────────────────────────────────
+
+interface ApiUser {
+  id: string;
+  full_name: string;
+  email: string;
+  mobile_number: string;
+  role: string;
+  is_email_verified: boolean;
+  is_banned: boolean;
+  date_joined: string;
+  last_active: string | null;
+  plan: string;
+  subscription_status: string | null;
+  questions_count: number;
+}
+
+interface ApiUsersResponse {
+  next: string | null;
+  previous: string | null;
+  results: ApiUser[];
+}
+
+// ── View Types ───────────────────────────────────────────────────────────────
 
 type UserStatus = "Active" | "Refunded" | "Inactive";
 
 interface User {
-  id: number;
+  id: string;
   name: string;
   plan: string;
   status: UserStatus;
@@ -16,17 +40,54 @@ interface User {
   questions: number;
 }
 
-// ── Data ────────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-const initialUsers: User[] = [
-  { id: 1, name: "Sarah Jenkins",   plan: "Lifetime $197", status: "Active",   joined: "May 12, 2026", lastActive: "2 hours ago",  questions: 42  },
-  { id: 2, name: "Amanda Riley",    plan: "Lifetime $197", status: "Active",   joined: "May 10, 2026", lastActive: "5 hours ago",  questions: 18  },
-  { id: 3, name: "Chloe Martinez",  plan: "Free",          status: "Active",   joined: "May 01, 2026", lastActive: "1 day ago",    questions: 156 },
-  { id: 4, name: "Jessica Taylor",  plan: "Lifetime $197", status: "Active",   joined: "Apr 28, 2026", lastActive: "2 days ago",   questions: 89  },
-  { id: 5, name: "Brittany Woods",  plan: "Lifetime $197", status: "Inactive", joined: "Apr 15, 2026", lastActive: "2 weeks ago",  questions: 5   },
-  { id: 6, name: "Ashley Chen",     plan: "Lifetime $197", status: "Refunded", joined: "Mar 22, 2026", lastActive: "1 month ago",  questions: 2   },
-  { id: 7, name: "Michelle Davis",  plan: "",              status: "Active",   joined: "Mar 10, 2026", lastActive: "3 hours ago",  questions: 210 },
-];
+const formatJoined = (dateStr: string): string =>
+  new Date(dateStr).toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
+
+const formatRelative = (dateStr: string | null): string => {
+  if (!dateStr) return "Never";
+
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+  const weeks = Math.floor(days / 7);
+  const months = Math.floor(days / 30);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  if (weeks < 5) return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+  return `${months} month${months === 1 ? "" : "s"} ago`;
+};
+
+const resolveStatus = (user: ApiUser): UserStatus => {
+  if (user.is_banned) return "Inactive";
+  if (user.subscription_status === "refunded") return "Refunded";
+  return "Active";
+};
+
+const resolvePlanLabel = (plan: string): string => {
+  if (!plan || plan.toLowerCase() === "free") return "Free";
+  // Capitalize e.g. "lifetime" -> "Lifetime"
+  return plan.charAt(0).toUpperCase() + plan.slice(1);
+};
+
+const mapApiUserToUser = (apiUser: ApiUser): User => ({
+  id: apiUser.id,
+  name: apiUser.full_name,
+  plan: resolvePlanLabel(apiUser.plan),
+  status: resolveStatus(apiUser),
+  joined: formatJoined(apiUser.date_joined),
+  lastActive: formatRelative(apiUser.last_active),
+  questions: apiUser.questions_count,
+});
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
@@ -77,7 +138,12 @@ const StatusBadge = ({ status }: { status: UserStatus }) => {
       </span>
     );
   }
-  return null;
+  return (
+    <span className="flex items-center gap-1.5 text-sm font-medium text-gray-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-gray-300 shrink-0" />
+      Inactive
+    </span>
+  );
 };
 
 const RevokeButton = ({ onClick }: { onClick: () => void }) => (
@@ -96,15 +162,29 @@ const RevokeButton = ({ onClick }: { onClick: () => void }) => (
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function Users() {
-  const [users, setUsers] = useState<User[]>(initialUsers);
-  const [search, setSearch] = useState("");
+  const { data, isLoading, isError, error } = useGetAllUsersQuery(undefined) as {
+    data: ApiUsersResponse | undefined;
+    isLoading: boolean;
+    isError: boolean;
+    error: unknown;
+  };
 
-  const filtered = users.filter((u) =>
-    u.name.toLowerCase().includes(search.toLowerCase())
+  const [search, setSearch] = useState("");
+  const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set());
+
+  const users: User[] = useMemo(() => {
+    if (!data?.results) return [];
+    return data.results.map(mapApiUserToUser);
+  }, [data]);
+
+  const filtered = users.filter(
+    (u) => !revokedIds.has(u.id) && u.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleRevoke = (id: number) => {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
+  const handleRevoke = (id: string) => {
+    // TODO: replace with a mutation call (e.g. useBanUserMutation) once the
+    // revoke/ban endpoint is available. For now this just hides the row.
+    setRevokedIds((prev) => new Set(prev).add(id));
   };
 
   return (
@@ -157,41 +237,69 @@ export default function Users() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {filtered.map((user, i) => (
-              <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                {/* User */}
-                <td className="px-5 py-5">
-                  <div className="flex items-center gap-3">
-                    <Avatar name={user.name} index={i} />
-                    <span className="font-medium text-amber-400">{user.name}</span>
-                  </div>
-                </td>
-
-                {/* Plan */}
-                <td className="px-5 py-5">
-                  <PlanBadge plan={user.plan} />
-                </td>
-
-                {/* Status */}
-                <td className="px-5 py-5">
-                  <StatusBadge status={user.status} />
-                </td>
-
-                {/* Joined */}
-                <td className="px-5 py-5 text-gray-500 whitespace-nowrap">{user.joined}</td>
-
-                {/* Last Active */}
-                <td className="px-5 py-5 text-gray-500 whitespace-nowrap">{user.lastActive}</td>
-
-                {/* Questions */}
-                <td className="px-5 py-5 text-gray-700">{user.questions}</td>
-
-                {/* Action */}
-                <td className="px-5 py-5">
-                  <RevokeButton onClick={() => handleRevoke(user.id)} />
+            {isLoading && (
+              <tr>
+                <td colSpan={7} className="px-5 py-8 text-center text-gray-400">
+                  Loading users...
                 </td>
               </tr>
-            ))}
+            )}
+
+            {isError && !isLoading && (
+              <tr>
+                <td colSpan={7} className="px-5 py-8 text-center text-red-500">
+                  Failed to load users. {error && typeof error === "object" && "status" in error
+                    ? `(Error ${(error as { status: unknown }).status})`
+                    : ""}
+                </td>
+              </tr>
+            )}
+
+            {!isLoading && !isError && filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-5 py-8 text-center text-gray-400">
+                  No users found.
+                </td>
+              </tr>
+            )}
+
+            {!isLoading &&
+              !isError &&
+              filtered.map((user, i) => (
+                <tr key={user.id} className="hover:bg-gray-50 transition-colors">
+                  {/* User */}
+                  <td className="px-5 py-5">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={user.name} index={i} />
+                      <span className="font-medium text-amber-400">{user.name}</span>
+                    </div>
+                  </td>
+
+                  {/* Plan */}
+                  <td className="px-5 py-5">
+                    <PlanBadge plan={user.plan} />
+                  </td>
+
+                  {/* Status */}
+                  <td className="px-5 py-5">
+                    <StatusBadge status={user.status} />
+                  </td>
+
+                  {/* Joined */}
+                  <td className="px-5 py-5 text-gray-500 whitespace-nowrap">{user.joined}</td>
+
+                  {/* Last Active */}
+                  <td className="px-5 py-5 text-gray-500 whitespace-nowrap">{user.lastActive}</td>
+
+                  {/* Questions */}
+                  <td className="px-5 py-5 text-gray-700">{user.questions}</td>
+
+                  {/* Action */}
+                  <td className="px-5 py-5">
+                    <RevokeButton onClick={() => handleRevoke(user.id)} />
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
       </div>

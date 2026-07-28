@@ -1,18 +1,21 @@
 'use client';
 
-import { Grid2X2, BookOpen, Users, Key, Menu, X } from 'lucide-react';
+import { Grid2X2, BookOpen, Users, Key, Menu, X, LogOut } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import mainLogo from '@/public/main-logo-nailgpt.png';
 import Image from 'next/image';
-import { selectUser } from '@/redux/features/auth/authSlice';
-import { useAppSelector } from '@/redux/hooks';
+import { logout, selectUser } from '@/redux/features/auth/authSlice';
+import { useAppSelector, useAppDispatch } from '@/redux/hooks';
 
 export default function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const user = useAppSelector(selectUser);
   const pathname = usePathname();
+  const router = useRouter();
+  const dispatch = useAppDispatch();
 
   const navItems = [
     { label: 'Overview', href: '/admin', icon: Grid2X2 },
@@ -24,6 +27,24 @@ export default function Sidebar() {
   const isActive = (href: string) => {
     if (href === '/admin') return pathname === '/admin';
     return pathname.startsWith(href);
+  };
+
+  const handleLogout = async () => {
+    const result = await Swal.fire({
+      title: 'Are you sure?',
+      text: 'You will be logged out of your account.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#eab308',
+      cancelButtonColor: '#6b7280',
+      confirmButtonText: 'Yes, logout',
+      cancelButtonText: 'Cancel',
+    });
+
+    if (!result.isConfirmed) return;
+
+    dispatch(logout());
+    router.push('/login');
   };
 
   return (
@@ -91,12 +112,19 @@ export default function Sidebar() {
         <div className="bg-yellow-50 rounded-lg p-3 sm:p-4 border border-yellow-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-gradient-to-br from-pink-400 to-orange-400 flex items-center justify-center text-white font-bold text-base sm:text-lg flex-shrink-0">
-              J
+              {user?.full_name?.slice(0, 2).toUpperCase() || 'AD'}
             </div>
-            <div>
-              <p className="text-xs sm:text-sm font-semibold text-yellow-700">{user?.full_name}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs sm:text-sm font-semibold text-yellow-700 truncate">{user?.full_name}</p>
               <p className="text-xs text-yellow-600">Admin</p>
             </div>
+            <button
+              onClick={handleLogout}
+              title="Logout"
+              className="p-2 rounded-lg text-yellow-700 hover:bg-yellow-100 hover:text-red-600 transition shrink-0 cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
           </div>
         </div>
       </aside>

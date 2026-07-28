@@ -4,7 +4,7 @@ const allUsersApi = baseApi.injectEndpoints({
     endpoints: (builder) => ({
         getAllUsers: builder.query({
             query: () => ({
-                url: '/api/auth/admin/users/',
+                url: '/api/admin/users/',
                 method: 'GET',
             })
         }),
@@ -12,3 +12,19 @@ const allUsersApi = baseApi.injectEndpoints({
 })
 
 export const { useGetAllUsersQuery } = allUsersApi;
+
+
+
+
+const individualUsersApi = baseApi.injectEndpoints({
+    endpoints: (builder) => ({
+        getIndividualUser: builder.query({
+            query: (userId: string) => ({
+                url: `/api/admin/users/${userId}/`,
+                method: 'GET',
+            })
+        }),
+    })
+})
+
+export const { useGetIndividualUserQuery } = individualUsersApi;
