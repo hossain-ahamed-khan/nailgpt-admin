@@ -1,30 +1,14 @@
 "use client";
 
-import { useGetAllUsersQuery } from "@/redux/features/admin/users/usersApi";
+import {
+  useGetAllUsersQuery,
+  useGetIndividualUserQuery,
+  useBanUnbanUserMutation,
+  type ApiUser,
+} from "@/redux/features/admin/users/usersApi";
 import React, { useMemo, useState } from "react";
-
-// ── API Types ────────────────────────────────────────────────────────────────
-
-interface ApiUser {
-  id: string;
-  full_name: string;
-  email: string;
-  mobile_number: string;
-  role: string;
-  is_email_verified: boolean;
-  is_banned: boolean;
-  date_joined: string;
-  last_active: string | null;
-  plan: string;
-  subscription_status: string | null;
-  questions_count: number;
-}
-
-interface ApiUsersResponse {
-  next: string | null;
-  previous: string | null;
-  results: ApiUser[];
-}
+import Swal from "sweetalert2";
+import { toast } from "sonner";
 
 // ── View Types ───────────────────────────────────────────────────────────────
 
@@ -35,6 +19,7 @@ interface User {
   name: string;
   plan: string;
   status: UserStatus;
+  isBanned: boolean;
   joined: string;
   lastActive: string;
   questions: number;
@@ -75,7 +60,6 @@ const resolveStatus = (user: ApiUser): UserStatus => {
 
 const resolvePlanLabel = (plan: string): string => {
   if (!plan || plan.toLowerCase() === "free") return "Free";
-  // Capitalize e.g. "lifetime" -> "Lifetime"
   return plan.charAt(0).toUpperCase() + plan.slice(1);
 };
 
@@ -84,6 +68,7 @@ const mapApiUserToUser = (apiUser: ApiUser): User => ({
   name: apiUser.full_name,
   plan: resolvePlanLabel(apiUser.plan),
   status: resolveStatus(apiUser),
+  isBanned: apiUser.is_banned,
   joined: formatJoined(apiUser.date_joined),
   lastActive: formatRelative(apiUser.last_active),
   questions: apiUser.questions_count,
@@ -146,45 +131,156 @@ const StatusBadge = ({ status }: { status: UserStatus }) => {
   );
 };
 
-const RevokeButton = ({ onClick }: { onClick: () => void }) => (
+const ViewButton = ({ onClick }: { onClick: () => void }) => (
   <button
     onClick={onClick}
-    className="w-8 h-8 rounded-lg bg-red-500 hover:bg-red-600 flex items-center justify-center transition-colors shrink-0"
-    aria-label="Revoke access"
+    className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors shrink-0"
+    aria-label="View user"
   >
-    <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <circle cx="12" cy="12" r="9" />
-      <path strokeLinecap="round" d="M6 6l12 12" />
+    <svg className="w-4 h-4 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   </button>
 );
 
+const BanUnbanButton = ({
+  isBanned,
+  isLoading,
+  onClick,
+}: {
+  isBanned: boolean;
+  isLoading: boolean;
+  onClick: () => void;
+}) => (
+  <button
+    onClick={onClick}
+    disabled={isLoading}
+    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${isBanned ? "bg-emerald-500 hover:bg-emerald-600" : "bg-red-500 hover:bg-red-600"
+      }`}
+    aria-label={isBanned ? "Unban user" : "Ban user"}
+  >
+    {isBanned ? (
+      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+      </svg>
+    ) : (
+      <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="9" />
+        <path strokeLinecap="round" d="M6 6l12 12" />
+      </svg>
+    )}
+  </button>
+);
+
+// ── User Detail Modal ───────────────────────────────────────────────────────
+
+const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
+  <div className="flex items-center justify-between py-2.5 border-b border-gray-100 last:border-0">
+    <span className="text-sm text-gray-500">{label}</span>
+    <span className="text-sm font-medium text-gray-800">{value}</span>
+  </div>
+);
+
+const UserDetailModal = ({ userId, onClose }: { userId: string; onClose: () => void }) => {
+  const { data: user, isLoading, isError } = useGetIndividualUserQuery(userId);
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-amber-400">User Details</h2>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center transition-colors"
+            aria-label="Close"
+          >
+            <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {isLoading && <p className="text-sm text-gray-400 py-6 text-center">Loading user...</p>}
+        {isError && <p className="text-sm text-red-500 py-6 text-center">Failed to load user.</p>}
+
+        {user && (
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-lg font-semibold">
+                {user.full_name.charAt(0)}
+              </div>
+              <div>
+                <p className="font-semibold text-gray-800">{user.full_name}</p>
+                <p className="text-sm text-gray-500">{user.email}</p>
+              </div>
+            </div>
+
+            <DetailRow label="Mobile" value={user.mobile_number || "—"} />
+            <DetailRow label="Role" value={user.role} />
+            <DetailRow label="Plan" value={resolvePlanLabel(user.plan)} />
+            <DetailRow label="Email Verified" value={user.is_email_verified ? "Yes" : "No"} />
+            <DetailRow label="Status" value={<StatusBadge status={resolveStatus(user)} />} />
+            <DetailRow label="Joined" value={formatJoined(user.date_joined)} />
+            <DetailRow label="Last Active" value={formatRelative(user.last_active)} />
+            <DetailRow label="Questions Asked" value={user.questions_count} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function Users() {
-  const { data, isLoading, isError, error } = useGetAllUsersQuery(undefined) as {
-    data: ApiUsersResponse | undefined;
-    isLoading: boolean;
-    isError: boolean;
-    error: unknown;
-  };
+  const { data, isLoading, isError, error, refetch } = useGetAllUsersQuery();
+  const [banUnbanUser, { isLoading: isTogglingBan }] = useBanUnbanUserMutation();
 
   const [search, setSearch] = useState("");
-  const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set());
+  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
 
   const users: User[] = useMemo(() => {
     if (!data?.results) return [];
     return data.results.map(mapApiUserToUser);
   }, [data]);
 
-  const filtered = users.filter(
-    (u) => !revokedIds.has(u.id) && u.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = users.filter((u) => u.name.toLowerCase().includes(search.toLowerCase()));
 
-  const handleRevoke = (id: string) => {
-    // TODO: replace with a mutation call (e.g. useBanUserMutation) once the
-    // revoke/ban endpoint is available. For now this just hides the row.
-    setRevokedIds((prev) => new Set(prev).add(id));
+  const handleBanUnban = async (user: User) => {
+    const willBan = !user.isBanned;
+
+    const result = await Swal.fire({
+      title: `${willBan ? "Ban" : "Unban"} ${user.name}?`,
+      text: willBan
+        ? "This user will lose access to the platform."
+        : "This user will regain access to the platform.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#F5A623",
+      cancelButtonColor: "#9ca3af",
+      confirmButtonText: `Yes, ${willBan ? "ban" : "unban"}`,
+    });
+
+    if (!result.isConfirmed) return;
+
+    setPendingUserId(user.id);
+    try {
+      const res = await banUnbanUser(user.id).unwrap();
+      toast.success(res.message);
+      refetch();
+    } catch {
+      toast.error(`Failed to ${willBan ? "ban" : "unban"} user.`);
+    } finally {
+      setPendingUserId(null);
+    }
   };
 
   return (
@@ -269,10 +365,13 @@ export default function Users() {
                 <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                   {/* User */}
                   <td className="px-5 py-5">
-                    <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setViewingUserId(user.id)}
+                      className="flex items-center gap-3 text-left"
+                    >
                       <Avatar name={user.name} index={i} />
-                      <span className="font-medium text-amber-400">{user.name}</span>
-                    </div>
+                      <span className="font-medium text-amber-400 hover:underline">{user.name}</span>
+                    </button>
                   </td>
 
                   {/* Plan */}
@@ -296,13 +395,24 @@ export default function Users() {
 
                   {/* Action */}
                   <td className="px-5 py-5">
-                    <RevokeButton onClick={() => handleRevoke(user.id)} />
+                    <div className="flex items-center gap-2">
+                      <ViewButton onClick={() => setViewingUserId(user.id)} />
+                      <BanUnbanButton
+                        isBanned={user.isBanned}
+                        isLoading={isTogglingBan && pendingUserId === user.id}
+                        onClick={() => handleBanUnban(user)}
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
+
+      {viewingUserId && (
+        <UserDetailModal userId={viewingUserId} onClose={() => setViewingUserId(null)} />
+      )}
     </div>
   );
 }

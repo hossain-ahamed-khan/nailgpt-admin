@@ -1,72 +1,66 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import { useGetCoachListQuery } from "@/redux/features/admin/knowledgeBase/coachApi";
+import {
+  useGetDocumentListQuery,
+  useUploadDocumentMutation,
+  useDeleteDocumentMutation,
+} from "@/redux/features/admin/knowledgeBase/knowledgeBaseApi";
+import React, { useState, useRef, useEffect } from "react";
+import { toast } from "sonner";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type FileStatus = "Indexed" | "Processing" | "Pending";
+type FileStatus = "indexed" | "processing" | "pending";
 
-interface KBFile {
-  id: number;
-  name: string;
-  coaches: string[];
-  size: string;
-  dateAdded: string;
+export interface KBDocument {
+  id: string;
+  file_name: string;
+  file_url: string;
+  file_size: number;
+  file_size_display: string;
+  assigned_coaches: string[];
+  is_all_coaches: boolean;
   status: FileStatus;
+  created_at: string;
 }
 
-// ── Data ────────────────────────────────────────────────────────────────────
+export interface DocumentListResponse {
+  next: string | null;
+  previous: string | null;
+  results: KBDocument[];
+}
 
-const initialFiles: KBFile[] = [
-  {
-    id: 1,
-    name: "Pricing_Masterclass_2025.pdf",
-    coaches: ["Pricing", "Business"],
-    size: "2.4 MB",
-    dateAdded: "May 12, 2026",
-    status: "Indexed",
-  },
-  {
-    id: 2,
-    name: "Client_Retention_Webinar_Transcript.docx",
-    coaches: ["Clientele"],
-    size: "1.1 MB",
-    dateAdded: "May 10, 2026",
-    status: "Indexed",
-  },
-  {
-    id: 3,
-    name: "IG_Caption_Templates_Q2.pdf",
-    coaches: ["Content"],
-    size: "850 KB",
-    dateAdded: "May 05, 2026",
-    status: "Indexed",
-  },
-  {
-    id: 4,
-    name: "Hiring_Assistant_SOP.pdf",
-    coaches: ["Business"],
-    size: "3.2 MB",
-    dateAdded: "Apr 28, 2026",
-    status: "Indexed",
-  },
-  {
-    id: 5,
-    name: "VoiceNote_Handling_Late_Clients.mp3",
-    coaches: ["Clientele"],
-    size: "4.5 MB",
-    dateAdded: "Apr 25, 2026",
-    status: "Indexed",
-  },
-  {
-    id: 6,
-    name: "New_Mentorship_Framework_Draft.pdf",
-    coaches: ["All"],
-    size: "1.8 MB",
-    dateAdded: "Today",
-    status: "Pending",
-  },
-];
+export interface Coach {
+  id: string;
+  name: string;
+  slug: string;
+  tagline: string;
+  icon: string;
+  accent_color: string;
+  system_prompt: string;
+  rules: string[];
+  temperature: number;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export type CoachListResponse = Coach[];
+
+interface CoachAssignment {
+  assignedCoaches: string[];
+  isAllCoaches: boolean;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+  });
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
@@ -85,7 +79,7 @@ const CoachBadge = ({ label }: { label: string }) => (
 );
 
 const StatusBadge = ({ status }: { status: FileStatus }) => {
-  if (status === "Indexed") {
+  if (status === "indexed") {
     return (
       <span className="flex items-center gap-1 text-xs font-medium text-emerald-600">
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -95,7 +89,7 @@ const StatusBadge = ({ status }: { status: FileStatus }) => {
       </span>
     );
   }
-  if (status === "Processing") {
+  if (status === "processing") {
     return (
       <span className="flex items-center gap-1 text-xs font-medium text-amber-500">
         <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -105,13 +99,14 @@ const StatusBadge = ({ status }: { status: FileStatus }) => {
       </span>
     );
   }
-  return <span className="text-xs text-gray-400">—</span>;
+  return <span className="text-xs text-amber-500 font-medium">Pending</span>;
 };
 
-const DeleteButton = ({ onClick }: { onClick: () => void }) => (
+const DeleteButton = ({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) => (
   <button
     onClick={onClick}
-    className="text-red-300 hover:text-red-500 transition-colors p-1"
+    disabled={disabled}
+    className="text-red-300 hover:text-red-500 transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer rounded-md"
     aria-label="Delete file"
   >
     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -120,15 +115,152 @@ const DeleteButton = ({ onClick }: { onClick: () => void }) => (
   </button>
 );
 
+const CoachDropdown = ({
+  fileId,
+  coaches,
+  coachesLoading,
+  coachesError,
+  assignedCoaches,
+  isAllCoaches,
+  onChange,
+}: {
+  fileId: string;
+  coaches: Coach[];
+  coachesLoading: boolean;
+  coachesError: boolean;
+  assignedCoaches: string[];
+  isAllCoaches: boolean;
+  onChange: (fileId: string, next: CoachAssignment) => void;
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const toggleCoach = (name: string) => {
+    const next = assignedCoaches.includes(name)
+      ? assignedCoaches.filter((c) => c !== name)
+      : [...assignedCoaches, name];
+    onChange(fileId, { assignedCoaches: next, isAllCoaches: false });
+  };
+
+  const toggleAll = () => {
+    onChange(fileId, { assignedCoaches: [], isAllCoaches: !isAllCoaches });
+  };
+
+  return (
+    <div ref={containerRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex flex-wrap items-center gap-1 cursor-pointer"
+      >
+        {isAllCoaches ? (
+          <CoachBadge label="All" />
+        ) : assignedCoaches.length > 0 ? (
+          assignedCoaches.map((c) => <CoachBadge key={c} label={c} />)
+        ) : (
+          <span className="text-xs text-gray-400 border border-dashed border-gray-300 px-2 py-0.5 rounded-md hover:border-amber-300 hover:text-amber-400 transition-colors">
+            + Assign
+          </span>
+        )}
+      </button>
+
+      {isOpen && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-48 bg-white border border-gray-100 rounded-lg shadow-lg py-1 max-h-64 overflow-y-auto">
+          <label className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer font-medium border-b border-gray-100">
+            <input
+              type="checkbox"
+              checked={isAllCoaches}
+              onChange={toggleAll}
+              className="accent-amber-400"
+            />
+            All Coaches
+          </label>
+
+          {coachesLoading && (
+            <div className="px-3 py-2 text-xs text-gray-400">Loading...</div>
+          )}
+          {coachesError && (
+            <div className="px-3 py-2 text-xs text-red-400">
+              Failed to load coaches.
+            </div>
+          )}
+          {!coachesLoading &&
+            !coachesError &&
+            coaches.map((coach) => (
+              <label
+                key={coach.id}
+                className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  disabled={isAllCoaches}
+                  checked={assignedCoaches.includes(coach.name)}
+                  onChange={() => toggleCoach(coach.name)}
+                  className="accent-amber-400"
+                />
+                {coach.name}
+              </label>
+            ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function KnowledgeBase() {
-  const [files, setFiles] = useState<KBFile[]>(initialFiles);
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleDelete = (id: number) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+  const {
+    data: documentList,
+    isLoading: isListLoading,
+    isError: isListError,
+  } = useGetDocumentListQuery();
+
+  const {
+    data: coachList,
+    isLoading: isCoachListLoading,
+    isError: isCoachListError,
+  } = useGetCoachListQuery();
+
+  const [uploadDocument, { isLoading: isUploading }] = useUploadDocumentMutation();
+  const [deleteDocument, { isLoading: isDeleting }] = useDeleteDocumentMutation();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [coachOverrides, setCoachOverrides] = useState<Record<string, CoachAssignment>>({});
+
+  const files: KBDocument[] = documentList?.results ?? [];
+  const coaches: Coach[] = coachList ?? [];
+
+  const handleFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return;
+
+    for (const file of Array.from(fileList)) {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        await uploadDocument(formData).unwrap();
+        toast.success(`${file.name} uploaded successfully`);
+      } catch (err) {
+        console.error("Upload failed:", err);
+        toast.error(`Failed to upload ${file.name}`);
+      }
+    }
+
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -141,7 +273,29 @@ export default function KnowledgeBase() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    // Extend with real upload logic as needed
+    handleFiles(e.dataTransfer.files);
+  };
+
+  const handleDelete = async (id: string, fileName: string) => {
+    const confirmed = window.confirm(`Delete "${fileName}"? This can't be undone.`);
+    if (!confirmed) return;
+
+    setDeletingId(id);
+    try {
+      await deleteDocument(id).unwrap();
+      toast.success(`${fileName} deleted`);
+    } catch (err) {
+      console.error("Delete failed:", err);
+      toast.error(`Failed to delete ${fileName}`);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleCoachChange = (fileId: string, next: CoachAssignment) => {
+    setCoachOverrides((prev) => ({ ...prev, [fileId]: next }));
+    // TODO: call your assign-coaches mutation here, e.g.
+    // updateDocumentCoaches({ id: fileId, assigned_coaches: next.assignedCoaches, is_all_coaches: next.isAllCoaches })
   };
 
   return (
@@ -160,13 +314,18 @@ export default function KnowledgeBase() {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
-        className={`bg-white border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer transition-colors mb-6 ${
-          isDragging
-            ? "border-amber-400 bg-amber-50"
-            : "border-gray-200 hover:border-amber-300"
-        }`}
+        className={`bg-white border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer transition-colors mb-6 ${isDragging
+          ? "border-amber-400 bg-amber-50"
+          : "border-gray-200 hover:border-amber-300"
+          }`}
       >
-        <input ref={inputRef} type="file" multiple className="hidden" />
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
         <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-4">
           <svg
             className="w-6 h-6 text-gray-400"
@@ -183,7 +342,7 @@ export default function KnowledgeBase() {
           </svg>
         </div>
         <p className="text-amber-400 font-medium text-sm mb-1">
-          Drop files here to upload
+          {isUploading ? "Uploading..." : "Drop files here to upload"}
         </p>
         <p className="text-gray-400 text-xs text-center max-w-xs">
           Supported formats: PDF, DOCX, PPTX, TXT, MP3, MP4. The AI will
@@ -205,31 +364,74 @@ export default function KnowledgeBase() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {files.map((file) => (
-              <tr key={file.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-5">
-                  <div className="flex items-center gap-3">
-                    <FileIcon />
-                    <span className="text-sm text-gray-800 font-medium">{file.name}</span>
-                  </div>
-                </td>
-                <td className="px-5 py-5">
-                  <div className="flex flex-wrap gap-1">
-                    {file.coaches.map((c) => (
-                      <CoachBadge key={c} label={c} />
-                    ))}
-                  </div>
-                </td>
-                <td className="px-5 py-5 text-gray-500 whitespace-nowrap">{file.size}</td>
-                <td className="px-5 py-5 text-gray-500 whitespace-nowrap">{file.dateAdded}</td>
-                <td className="px-5 py-5">
-                  <StatusBadge status={file.status} />
-                </td>
-                <td className="px-5 py-5 text-right">
-                  <DeleteButton onClick={() => handleDelete(file.id)} />
+            {isListLoading && (
+              <tr>
+                <td className="px-5 py-6 text-gray-400 text-sm" colSpan={6}>
+                  Loading files...
                 </td>
               </tr>
-            ))}
+            )}
+
+            {isListError && (
+              <tr>
+                <td className="px-5 py-6 text-red-400 text-sm" colSpan={6}>
+                  Failed to load files.
+                </td>
+              </tr>
+            )}
+
+            {!isListLoading && !isListError && files.length === 0 && (
+              <tr>
+                <td className="px-5 py-6 text-gray-400 text-sm" colSpan={6}>
+                  No files uploaded yet.
+                </td>
+              </tr>
+            )}
+
+            {files.map((file) => {
+              const override = coachOverrides[file.id];
+              const assignedCoaches = override?.assignedCoaches ?? file.assigned_coaches;
+              const isAllCoaches = override?.isAllCoaches ?? file.is_all_coaches;
+
+              return (
+                <tr key={file.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-5 py-5">
+                    <div className="flex items-center gap-3">
+                      <FileIcon />
+                      <span className="text-sm text-gray-800 font-medium">
+                        {file.file_name}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-5">
+                    <CoachDropdown
+                      fileId={file.id}
+                      coaches={coaches}
+                      coachesLoading={isCoachListLoading}
+                      coachesError={isCoachListError}
+                      assignedCoaches={assignedCoaches}
+                      isAllCoaches={isAllCoaches}
+                      onChange={handleCoachChange}
+                    />
+                  </td>
+                  <td className="px-5 py-5 text-gray-500 whitespace-nowrap">
+                    {file.file_size_display}
+                  </td>
+                  <td className="px-5 py-5 text-gray-500 whitespace-nowrap">
+                    {formatDate(file.created_at)}
+                  </td>
+                  <td className="px-5 py-5">
+                    <StatusBadge status={file.status} />
+                  </td>
+                  <td className="px-5 py-5 text-right">
+                    <DeleteButton
+                      onClick={() => handleDelete(file.id, file.file_name)}
+                      disabled={isDeleting && deletingId === file.id}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

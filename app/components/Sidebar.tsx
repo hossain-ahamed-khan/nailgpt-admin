@@ -44,7 +44,7 @@ export default function Sidebar() {
     if (!result.isConfirmed) return;
 
     dispatch(logout());
-    router.push('/login');
+    router.push('/admin-login');
   };
 
   return (

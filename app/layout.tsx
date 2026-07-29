@@ -27,7 +27,7 @@ export default function RootLayout({
         <Providers>
           <main className="flex-1 overflow-auto">{children}</main>
         </Providers>
-        <Toaster />
+        <Toaster richColors position="top-center" />
       </body>
     </html>
   );
