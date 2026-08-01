@@ -4,17 +4,21 @@ import { useRef, useState } from "react";
 import mainLogo from '@/public/main-logo-nailgpt.png';
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { useForgotPasswordMutation, useVerifyResetOtpMutation } from "@/redux/features/forgotPassword/forgotPasswordApi";
 
-const OTP_LENGTH = 5;
+const OTP_LENGTH = 6;
 
 export default function VerifyOtpPage() {
     const [otp, setOtp] = useState<string[]>(Array(OTP_LENGTH).fill(""));
-    const [isSubmitting, setIsSubmitting] = useState(false);
     const [isResending, setIsResending] = useState(false);
     const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
     const router = useRouter();
     const searchParams = useSearchParams();
     const email = searchParams.get("email") ?? "";
+
+    const [verifyResetOtp, { isLoading: isSubmitting }] = useVerifyResetOtpMutation();
+    const [forgotPassword] = useForgotPasswordMutation();
 
     const handleChange = (index: number, value: string) => {
         if (!/^[0-9]?$/.test(value)) return;
@@ -52,21 +56,23 @@ export default function VerifyOtpPage() {
         const code = otp.join("");
         if (code.length !== OTP_LENGTH) return;
 
-        setIsSubmitting(true);
         try {
-            // TODO: wire up to your verify-otp RTK Query mutation
-            console.log({ email, code });
-            router.push(`/reset-password?email=${encodeURIComponent(email)}`);
-        } finally {
-            setIsSubmitting(false);
+            const response = await verifyResetOtp({ email, code }).unwrap();
+            router.push(
+                `/admin-login/reset-password?email=${encodeURIComponent(email)}&reset_token=${encodeURIComponent(response.reset_token)}`
+            );
+        } catch (error: any) {
+            toast.error(error?.data?.detail || "Invalid or expired code");
         }
     };
 
     const handleResend = async () => {
         setIsResending(true);
         try {
-            // TODO: wire up to your resend-otp RTK Query mutation
-            console.log("resend otp to", email);
+            const response = await forgotPassword({ email }).unwrap();
+            toast.success(response.detail);
+        } catch (error: any) {
+            toast.error(error?.data?.detail || "Failed to resend code");
         } finally {
             setIsResending(false);
         }

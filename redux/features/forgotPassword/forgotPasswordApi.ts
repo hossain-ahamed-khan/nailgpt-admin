@@ -1,51 +1,60 @@
 import { baseApi } from "@/redux/api/baseApi";
 
-const forgotPasswordApi = baseApi.injectEndpoints({
+interface ForgotPasswordRequest {
+    email: string;
+}
+
+interface ForgotPasswordResponse {
+    detail: string;
+}
+
+interface VerifyResetOtpRequest {
+    email: string;
+    code: string;
+}
+
+interface VerifyResetOtpResponse {
+    reset_token: string;
+}
+
+interface ResetPasswordRequest {
+    reset_token: string;
+    password: string;
+    confirm_password: string;
+}
+
+interface ResetPasswordResponse {
+    detail: string;
+}
+
+const authResetApi = baseApi.injectEndpoints({
     endpoints: (builder) => ({
-        forgotPassword: builder.mutation({
-            query: (email) => ({
-                url: '/api/auth/forgot-password/',
-                method: 'POST',
-                body: { email }
-            })
-        })
-    })
-})
+        forgotPassword: builder.mutation<ForgotPasswordResponse, ForgotPasswordRequest>({
+            query: (body) => ({
+                url: "/api/auth/forgot-password/",
+                method: "POST",
+                body,
+            }),
+        }),
+        verifyResetOtp: builder.mutation<VerifyResetOtpResponse, VerifyResetOtpRequest>({
+            query: (body) => ({
+                url: "/api/auth/verify-reset-otp/",
+                method: "POST",
+                body,
+            }),
+        }),
+        resetPassword: builder.mutation<ResetPasswordResponse, ResetPasswordRequest>({
+            query: (body) => ({
+                url: "/api/auth/reset-password/",
+                method: "POST",
+                body,
+            }),
+        }),
+    }),
+});
 
-export const { useForgotPasswordMutation } = forgotPasswordApi;
-
-
-
-
-
-const verifyResetOtpApi = baseApi.injectEndpoints({
-    endpoints: (builder) => ({
-        verifyResetOtp: builder.mutation({
-            query: (otpData) => ({
-                url: '/api/auth/verify-reset-otp/',
-                method: 'POST',
-                body: otpData
-            })
-        })
-    })
-})
-
-export const { useVerifyResetOtpMutation } = verifyResetOtpApi;
-
-
-
-
-
-const resetPasswordApi = baseApi.injectEndpoints({
-    endpoints: (builder) => ({
-        resetPassword: builder.mutation({
-            query: (passwordData) => ({
-                url: '/api/auth/reset-password/',
-                method: 'POST',
-                body: passwordData
-            })
-        })
-    })
-})
-
-export const { useResetPasswordMutation } = resetPasswordApi;
+export const {
+    useForgotPasswordMutation,
+    useVerifyResetOtpMutation,
+    useResetPasswordMutation,
+} = authResetApi;

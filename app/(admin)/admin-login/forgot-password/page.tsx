@@ -4,21 +4,22 @@ import { useState } from "react";
 import mainLogo from '@/public/main-logo-nailgpt.png';
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { useForgotPasswordMutation } from "@/redux/features/forgotPassword/forgotPasswordApi";
 
 export default function ForgotPasswordPage() {
     const [email, setEmail] = useState("");
-    const [isSubmitting, setIsSubmitting] = useState(false);
     const router = useRouter();
+    const [forgotPassword, { isLoading: isSubmitting }] = useForgotPasswordMutation();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsSubmitting(true);
         try {
-            // TODO: wire up to your forgot-password RTK Query mutation
-            console.log({ email });
+            const response = await forgotPassword({ email }).unwrap();
+            toast.success(response.detail);
             router.push(`/admin-login/verify-otp?email=${encodeURIComponent(email)}`);
-        } finally {
-            setIsSubmitting(false);
+        } catch (error: any) {
+            toast.error(error?.data?.detail || "Something went wrong. Please try again.");
         }
     };
 

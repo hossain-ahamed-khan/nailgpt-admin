@@ -5,17 +5,20 @@ import mainLogo from '@/public/main-logo-nailgpt.png';
 import Image from "next/image";
 import { Eye, EyeOff } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
+import { useResetPasswordMutation } from "@/redux/features/forgotPassword/forgotPasswordApi";
 
 export default function ResetPasswordPage() {
     const [newPassword, setNewPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [showNewPassword, setShowNewPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-    const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState("");
     const router = useRouter();
     const searchParams = useSearchParams();
-    const email = searchParams.get("email") ?? "";
+    const resetToken = searchParams.get("reset_token") ?? "";
+
+    const [resetPassword, { isLoading: isSubmitting }] = useResetPasswordMutation();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -26,13 +29,16 @@ export default function ResetPasswordPage() {
             return;
         }
 
-        setIsSubmitting(true);
         try {
-            // TODO: wire up to your reset-password RTK Query mutation
-            console.log({ email, newPassword });
+            const response = await resetPassword({
+                reset_token: resetToken,
+                password: newPassword,
+                confirm_password: confirmPassword,
+            }).unwrap();
+            toast.success(response.detail);
             router.push("/password-updated");
-        } finally {
-            setIsSubmitting(false);
+        } catch (error: any) {
+            setError(error?.data?.detail || "Failed to reset password. Please try again.");
         }
     };
 
