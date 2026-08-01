@@ -36,7 +36,7 @@ export default function ResetPasswordPage() {
                 confirm_password: confirmPassword,
             }).unwrap();
             toast.success(response.detail);
-            router.push("/password-updated");
+            router.push("/admin-login/password-updated");
         } catch (error: any) {
             setError(error?.data?.detail || "Failed to reset password. Please try again.");
         }
@@ -142,7 +142,7 @@ export default function ResetPasswordPage() {
                     <button
                         type="submit"
                         disabled={isSubmitting}
-                        className="w-full rounded-md border border-amber-500 bg-amber-400 py-2.5 text-sm font-medium text-white transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="w-full rounded-md border border-amber-500 bg-amber-400 py-2.5 text-sm font-medium text-white transition-colors hover:bg-amber-500 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
                     >
                         {isSubmitting ? "Saving..." : "Reset Password"}
                     </button>

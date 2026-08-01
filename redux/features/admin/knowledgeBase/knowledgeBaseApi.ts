@@ -1,6 +1,12 @@
 import { DocumentListResponse, KBDocument } from "@/app/(admin)/admin/Knowledge-Base/page";
 import { baseApi } from "@/redux/api/baseApi";
 
+interface UpdateDocumentCoachesPayload {
+    documentId: string;
+    coachIds: string[];
+    isAllCoaches: boolean;
+}
+
 const documentListApi = baseApi.injectEndpoints({
     endpoints: (builder) => ({
         getDocumentList: builder.query<DocumentListResponse, void>({
@@ -49,6 +55,27 @@ const uploadDocumentApi = baseApi.injectEndpoints({
 });
 
 export const { useUploadDocumentMutation } = uploadDocumentApi;
+
+
+
+
+const updateDocumentApi = baseApi.injectEndpoints({
+    endpoints: (builder) => ({
+        updateDocument: builder.mutation<KBDocument, UpdateDocumentCoachesPayload>({
+            query: ({ documentId, coachIds, isAllCoaches }) => ({
+                url: `/api/admin/knowledge-base/${documentId}/`,
+                method: 'PATCH',
+                body: {
+                    coach_ids: coachIds,
+                    is_all_coaches: isAllCoaches,
+                },
+            }),
+            invalidatesTags: ["DocumentList"],
+        }),
+    }),
+});
+
+export const { useUpdateDocumentMutation } = updateDocumentApi;
 
 
 

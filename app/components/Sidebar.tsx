@@ -19,8 +19,9 @@ export default function Sidebar() {
 
   const navItems = [
     { label: 'Overview', href: '/admin', icon: Grid2X2 },
-    { label: 'Knowledge Base', href: '/admin/Knowledge-Base', icon: BookOpen },
     { label: 'Users', href: '/admin/Users', icon: Users },
+    { label: 'Coaches', href: '/admin/Coaches', icon: Users },
+    { label: 'Knowledge Base', href: '/admin/Knowledge-Base', icon: BookOpen },
     { label: 'Api Key', href: '/admin/ApI-Key', icon: Key },
   ];
 

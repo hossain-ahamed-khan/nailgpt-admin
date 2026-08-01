@@ -1,17 +1,25 @@
 "use client";
 
-import { useGetCoachListQuery } from "@/redux/features/admin/knowledgeBase/coachApi";
+import { useGetCoachListQuery } from "@/redux/features/admin/coaches/coachesApi";
 import {
   useGetDocumentListQuery,
   useUploadDocumentMutation,
   useDeleteDocumentMutation,
+  useUpdateDocumentMutation,
 } from "@/redux/features/admin/knowledgeBase/knowledgeBaseApi";
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import Swal from "sweetalert2";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type FileStatus = "indexed" | "processing" | "pending";
+
+export interface AssignedCoach {
+  id: string;
+  name: string;
+}
 
 export interface KBDocument {
   id: string;
@@ -19,7 +27,7 @@ export interface KBDocument {
   file_url: string;
   file_size: number;
   file_size_display: string;
-  assigned_coaches: string[];
+  assigned_coaches: AssignedCoach[];
   is_all_coaches: boolean;
   status: FileStatus;
   created_at: string;
@@ -47,11 +55,6 @@ export interface Coach {
 }
 
 export type CoachListResponse = Coach[];
-
-interface CoachAssignment {
-  assignedCoaches: string[];
-  isAllCoaches: boolean;
-}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -115,6 +118,11 @@ const DeleteButton = ({ onClick, disabled }: { onClick: () => void; disabled?: b
   </button>
 );
 
+// ── Coach Dropdown (portal-based, always visible & unclipped) ───────────────
+
+const DROPDOWN_WIDTH = 192; // w-48
+const DROPDOWN_MAX_HEIGHT = 260; // approx max-h-64 + header row
+
 const CoachDropdown = ({
   fileId,
   coaches,
@@ -122,22 +130,72 @@ const CoachDropdown = ({
   coachesError,
   assignedCoaches,
   isAllCoaches,
+  isSaving,
   onChange,
 }: {
   fileId: string;
   coaches: Coach[];
   coachesLoading: boolean;
   coachesError: boolean;
-  assignedCoaches: string[];
+  assignedCoaches: AssignedCoach[];
   isAllCoaches: boolean;
-  onChange: (fileId: string, next: CoachAssignment) => void;
+  isSaving: boolean;
+  onChange: (fileId: string, coachIds: string[], isAllCoaches: boolean) => void;
 }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number; openUpward: boolean } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const computeCoords = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUpward = spaceBelow < DROPDOWN_MAX_HEIGHT && rect.top > DROPDOWN_MAX_HEIGHT;
+
+    let left = rect.left;
+    // Keep the panel within the horizontal viewport bounds
+    if (left + DROPDOWN_WIDTH > window.innerWidth - 8) {
+      left = window.innerWidth - DROPDOWN_WIDTH - 8;
+    }
+
+    setCoords({
+      top: openUpward ? rect.top - 4 : rect.bottom + 4,
+      left,
+      openUpward,
+    });
+  };
+
+  const toggleOpen = () => {
+    if (!isOpen) computeCoords();
+    setIsOpen((prev) => !prev);
+  };
+
+  // Recompute position on open, and keep in sync on scroll/resize
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    computeCoords();
+
+    const handleReposition = () => computeCoords();
+    window.addEventListener("scroll", handleReposition, true);
+    window.addEventListener("resize", handleReposition);
+    return () => {
+      window.removeEventListener("scroll", handleReposition, true);
+      window.removeEventListener("resize", handleReposition);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        buttonRef.current &&
+        !buttonRef.current.contains(target) &&
+        panelRef.current &&
+        !panelRef.current.contains(target)
+      ) {
         setIsOpen(false);
       }
     };
@@ -145,74 +203,97 @@ const CoachDropdown = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const toggleCoach = (name: string) => {
-    const next = assignedCoaches.includes(name)
-      ? assignedCoaches.filter((c) => c !== name)
-      : [...assignedCoaches, name];
-    onChange(fileId, { assignedCoaches: next, isAllCoaches: false });
+  const toggleCoach = (coachId: string) => {
+    const isAssigned = assignedCoaches.some((c) => c.id === coachId);
+    const nextIds = isAssigned
+      ? assignedCoaches.filter((c) => c.id !== coachId).map((c) => c.id)
+      : [...assignedCoaches.map((c) => c.id), coachId];
+    onChange(fileId, nextIds, false);
   };
 
   const toggleAll = () => {
-    onChange(fileId, { assignedCoaches: [], isAllCoaches: !isAllCoaches });
+    onChange(fileId, [], !isAllCoaches);
   };
 
   return (
-    <div ref={containerRef} className="relative inline-block">
+    <div className="relative inline-block">
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="flex flex-wrap items-center gap-1 cursor-pointer"
+        onClick={toggleOpen}
+        disabled={isSaving}
+        className="flex flex-wrap items-center gap-1 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isAllCoaches ? (
-          <CoachBadge label="All" />
-        ) : assignedCoaches.length > 0 ? (
-          assignedCoaches.map((c) => <CoachBadge key={c} label={c} />)
+        {isSaving ? (
+          <span className="text-xs text-gray-400">Saving...</span>
         ) : (
-          <span className="text-xs text-gray-400 border border-dashed border-gray-300 px-2 py-0.5 rounded-md hover:border-amber-300 hover:text-amber-400 transition-colors">
-            + Assign
-          </span>
+          <>
+            {isAllCoaches ? (
+              <CoachBadge label="All" />
+            ) : (
+              assignedCoaches.map((c) => <CoachBadge key={c.id} label={c.name} />)
+            )}
+            {!isAllCoaches && (
+              <span className="text-xs text-gray-400 border border-dashed border-gray-300 px-2 py-0.5 rounded-md hover:border-amber-300 hover:text-amber-400 transition-colors">
+                + Assign
+              </span>
+            )}
+          </>
         )}
       </button>
 
-      {isOpen && (
-        <div className="absolute z-50 top-full left-0 mt-1 w-48 bg-white border border-gray-100 rounded-lg shadow-lg py-1 max-h-64 overflow-y-auto">
-          <label className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer font-medium border-b border-gray-100">
-            <input
-              type="checkbox"
-              checked={isAllCoaches}
-              onChange={toggleAll}
-              className="accent-amber-400"
-            />
-            All Coaches
-          </label>
+      {isOpen &&
+        coords &&
+        createPortal(
+          <div
+            ref={panelRef}
+            style={{
+              position: "fixed",
+              top: coords.top,
+              left: coords.left,
+              width: DROPDOWN_WIDTH,
+              transform: coords.openUpward ? "translateY(-100%)" : undefined,
+            }}
+            className="z-[999] bg-white border border-gray-100 rounded-lg shadow-lg py-1 max-h-64 overflow-y-auto"
+          >
+            <label className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer font-medium border-b border-gray-100">
+              <input
+                type="checkbox"
+                checked={isAllCoaches}
+                onChange={toggleAll}
+                className="accent-amber-400"
+              />
+              All Coaches
+            </label>
 
-          {coachesLoading && (
-            <div className="px-3 py-2 text-xs text-gray-400">Loading...</div>
-          )}
-          {coachesError && (
-            <div className="px-3 py-2 text-xs text-red-400">
-              Failed to load coaches.
-            </div>
-          )}
-          {!coachesLoading &&
-            !coachesError &&
-            coaches.map((coach) => (
-              <label
-                key={coach.id}
-                className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  disabled={isAllCoaches}
-                  checked={assignedCoaches.includes(coach.name)}
-                  onChange={() => toggleCoach(coach.name)}
-                  className="accent-amber-400"
-                />
-                {coach.name}
-              </label>
-            ))}
-        </div>
-      )}
+            {coachesLoading && (
+              <div className="px-3 py-2 text-xs text-gray-400">Loading...</div>
+            )}
+            {coachesError && (
+              <div className="px-3 py-2 text-xs text-red-400">
+                Failed to load coaches.
+              </div>
+            )}
+            {!coachesLoading &&
+              !coachesError &&
+              coaches.map((coach) => (
+                <label
+                  key={coach.id}
+                  className="flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    disabled={isAllCoaches}
+                    checked={assignedCoaches.some((c) => c.id === coach.id)}
+                    onChange={() => toggleCoach(coach.id)}
+                    className="accent-amber-400"
+                  />
+                  {coach.name}
+                </label>
+              ))}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
@@ -237,9 +318,10 @@ export default function KnowledgeBase() {
 
   const [uploadDocument, { isLoading: isUploading }] = useUploadDocumentMutation();
   const [deleteDocument, { isLoading: isDeleting }] = useDeleteDocumentMutation();
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [updateDocument] = useUpdateDocumentMutation();
 
-  const [coachOverrides, setCoachOverrides] = useState<Record<string, CoachAssignment>>({});
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [savingCoachId, setSavingCoachId] = useState<string | null>(null);
 
   const files: KBDocument[] = documentList?.results ?? [];
   const coaches: Coach[] = coachList ?? [];
@@ -277,8 +359,18 @@ export default function KnowledgeBase() {
   };
 
   const handleDelete = async (id: string, fileName: string) => {
-    const confirmed = window.confirm(`Delete "${fileName}"? This can't be undone.`);
-    if (!confirmed) return;
+    const result = await Swal.fire({
+      title: "Delete file?",
+      text: `"${fileName}" will be permanently deleted. This can't be undone.`,
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Delete",
+      cancelButtonText: "Cancel",
+      confirmButtonColor: "#dc2626",
+      reverseButtons: true,
+    });
+
+    if (!result.isConfirmed) return;
 
     setDeletingId(id);
     try {
@@ -292,10 +384,20 @@ export default function KnowledgeBase() {
     }
   };
 
-  const handleCoachChange = (fileId: string, next: CoachAssignment) => {
-    setCoachOverrides((prev) => ({ ...prev, [fileId]: next }));
-    // TODO: call your assign-coaches mutation here, e.g.
-    // updateDocumentCoaches({ id: fileId, assigned_coaches: next.assignedCoaches, is_all_coaches: next.isAllCoaches })
+  const handleCoachChange = async (
+    fileId: string,
+    coachIds: string[],
+    isAllCoaches: boolean
+  ) => {
+    setSavingCoachId(fileId);
+    try {
+      await updateDocument({ documentId: fileId, coachIds, isAllCoaches }).unwrap();
+    } catch (err) {
+      console.error("Failed to update assigned coaches:", err);
+      toast.error("Failed to update assigned coaches");
+    } finally {
+      setSavingCoachId(null);
+    }
   };
 
   return (
@@ -388,50 +490,45 @@ export default function KnowledgeBase() {
               </tr>
             )}
 
-            {files.map((file) => {
-              const override = coachOverrides[file.id];
-              const assignedCoaches = override?.assignedCoaches ?? file.assigned_coaches;
-              const isAllCoaches = override?.isAllCoaches ?? file.is_all_coaches;
-
-              return (
-                <tr key={file.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-5 py-5">
-                    <div className="flex items-center gap-3">
-                      <FileIcon />
-                      <span className="text-sm text-gray-800 font-medium">
-                        {file.file_name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-5">
-                    <CoachDropdown
-                      fileId={file.id}
-                      coaches={coaches}
-                      coachesLoading={isCoachListLoading}
-                      coachesError={isCoachListError}
-                      assignedCoaches={assignedCoaches}
-                      isAllCoaches={isAllCoaches}
-                      onChange={handleCoachChange}
-                    />
-                  </td>
-                  <td className="px-5 py-5 text-gray-500 whitespace-nowrap">
-                    {file.file_size_display}
-                  </td>
-                  <td className="px-5 py-5 text-gray-500 whitespace-nowrap">
-                    {formatDate(file.created_at)}
-                  </td>
-                  <td className="px-5 py-5">
-                    <StatusBadge status={file.status} />
-                  </td>
-                  <td className="px-5 py-5 text-right">
-                    <DeleteButton
-                      onClick={() => handleDelete(file.id, file.file_name)}
-                      disabled={isDeleting && deletingId === file.id}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
+            {files.map((file) => (
+              <tr key={file.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-5 py-5">
+                  <div className="flex items-center gap-3">
+                    <FileIcon />
+                    <span className="text-sm text-gray-800 font-medium">
+                      {file.file_name}
+                    </span>
+                  </div>
+                </td>
+                <td className="px-5 py-5">
+                  <CoachDropdown
+                    fileId={file.id}
+                    coaches={coaches}
+                    coachesLoading={isCoachListLoading}
+                    coachesError={isCoachListError}
+                    assignedCoaches={file.assigned_coaches}
+                    isAllCoaches={file.is_all_coaches}
+                    isSaving={savingCoachId === file.id}
+                    onChange={handleCoachChange}
+                  />
+                </td>
+                <td className="px-5 py-5 text-gray-500 whitespace-nowrap">
+                  {file.file_size_display}
+                </td>
+                <td className="px-5 py-5 text-gray-500 whitespace-nowrap">
+                  {formatDate(file.created_at)}
+                </td>
+                <td className="px-5 py-5">
+                  <StatusBadge status={file.status} />
+                </td>
+                <td className="px-5 py-5 text-right">
+                  <DeleteButton
+                    onClick={() => handleDelete(file.id, file.file_name)}
+                    disabled={isDeleting && deletingId === file.id}
+                  />
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

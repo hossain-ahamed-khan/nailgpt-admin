@@ -33,8 +33,8 @@ export default function PasswordUpdatedPage() {
                 </div>
 
                 <Link
-                    href="/login"
-                    className="block w-full rounded-md border border-amber-500 bg-amber-400 py-2.5 text-center text-sm font-medium text-white transition-colors hover:bg-amber-500"
+                    href="/admin-login"
+                    className="block w-full rounded-md border border-amber-500 bg-amber-400 py-2.5 text-center text-sm font-medium text-white transition-colors hover:bg-amber-500 cursor-pointer"
                 >
                     Sign in
                 </Link>
